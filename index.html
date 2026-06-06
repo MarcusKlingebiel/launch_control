@@ -371,15 +371,21 @@
   <p class="brief">
     You are <strong>CAPCOM</strong> — the Capsule Communicator. The single voice
     between Mission Control and the crew. Guide Columbia and Eagle from the launch
-    pad at Kennedy Space Center to the surface of the Moon.
+    pad all the way to Moon landing and back. <strong>Fuel carries through all 11 phases</strong> —
+    every missed timing window costs propellant that you'll desperately need on the return.
   </p>
   <div class="phases-list">
     <span class="phase-chip">I · LAUNCH</span>
     <span class="phase-chip">II · EARTH ORBIT</span>
     <span class="phase-chip">III · TLI BURN</span>
-    <span class="phase-chip">IV · COAST &amp; CORRECTION</span>
+    <span class="phase-chip">IV · COAST</span>
     <span class="phase-chip">V · LUNAR ORBIT</span>
-    <span class="phase-chip">VI · POWERED DESCENT</span>
+    <span class="phase-chip">VI · DESCENT</span>
+    <span class="phase-chip">VII · ASCENT</span>
+    <span class="phase-chip">VIII · RENDEZVOUS</span>
+    <span class="phase-chip">IX · TEI BURN</span>
+    <span class="phase-chip">X · REENTRY</span>
+    <span class="phase-chip">XI · SPLASHDOWN</span>
   </div>
   <button class="btn pulse" style="margin-top:8px;font-size:13px;padding:8px 28px"
           onclick="startGame()">[ INITIATE MISSION ]</button>
@@ -509,15 +515,20 @@ const sfx = {
 // ═══════════════════════════════════════════════════════════════════════════
 // CONSTANTS
 // ═══════════════════════════════════════════════════════════════════════════
-const PHASE_ORDER = ['launch','orbit','tli','coast','loi','descent','victory'];
+const PHASE_ORDER = ['launch','orbit','tli','coast','loi','descent','ascent','rendezvous','tei','reentry','splashdown','victory'];
 const PHASE_NAMES = {
-  launch:  'I · LAUNCH',
-  orbit:   'II · EARTH ORBIT',
-  tli:     'III · TLI BURN',
-  coast:   'IV · TRANSLUNAR COAST',
-  loi:     'V · LUNAR ORBIT INSERTION',
-  descent: 'VI · POWERED DESCENT',
-  victory: '✓ MISSION COMPLETE',
+  launch:      'I · LAUNCH',
+  orbit:       'II · EARTH ORBIT',
+  tli:         'III · TLI BURN',
+  coast:       'IV · TRANSLUNAR COAST',
+  loi:         'V · LUNAR ORBIT INSERTION',
+  descent:     'VI · POWERED DESCENT',
+  ascent:      'VII · LUNAR ASCENT',
+  rendezvous:  'VIII · RENDEZVOUS & DOCKING',
+  tei:         'IX · TRANS-EARTH INJECTION',
+  reentry:     'X · REENTRY',
+  splashdown:  'XI · SPLASHDOWN',
+  victory:     '✓ MISSION COMPLETE',
 };
 
 // Pre-generated star field (deterministic)
@@ -592,6 +603,58 @@ function resetState() {
       crashed: false,
       landed:  false,
       padX: 0,
+    },
+
+    ascent: {
+      active: false,
+      y: 0,          // px from ground (increases upward)
+      vy: 0,         // px/s upward
+      vx: 0,
+      x: 0,
+      fuel: 0,
+      orbitAlt: 0,   // target altitude px (set at init)
+      reached: false,
+      thrustTime: 0,
+    },
+
+    rendezvous: {
+      lemAngle: 185,   // degrees on orbit
+      csmAngle:  10,   // degrees on orbit
+      csmSpeed:  22,   // deg/sec (CSM auto-orbits)
+      winSize:   24,   // ±degrees for intercept window
+      docked:    false,
+    },
+
+    tei: {
+      angle:    0,
+      speed:    20,
+      winStart: 130,
+      winEnd:   200,
+      burned:   false,
+    },
+
+    reentry: {
+      t:       0,      // 0→1 approach to Earth
+      angle:   7.2,    // current entry angle (degrees below horizontal)
+      target:  6.5,    // ideal angle
+      corLo:   5.2,    // corridor lower
+      corHi:   7.8,    // corridor upper
+      atmos:   false,  // hit atmosphere
+      heat:    0,      // 0-100 overheat
+      skip:    false,  // too shallow, skipped off
+      entered: false,
+      countdown: -1,   // seconds to atmosphere entry
+    },
+
+    splashdown: {
+      x: 0, y: 0,     // canvas position
+      vx: 0,          // wind drift (px/s)
+      vy: 0,          // fall speed (px/s)
+      fuel: 0,
+      chutes: false,
+      landed: false,
+      targetX: 0,
+      targetY: 0,
     },
   };
 }
@@ -686,7 +749,7 @@ function updateTelemetry({ alt, vel, fuel, thr, extra, window: win }) {
 function updateProgress() {
   const track = document.getElementById('progress-track');
   track.innerHTML = '';
-  const phases = PHASE_ORDER.slice(0, 6);
+  const phases = PHASE_ORDER.slice(0, 11);
   const cur = PHASE_ORDER.indexOf(S.phase);
   phases.forEach((p, i) => {
     const d = document.createElement('div');
@@ -1129,35 +1192,40 @@ function drawDescent() {
 }
 
 function drawVictory() {
+  // Final victory scene: Pacific Ocean splashdown, Earth in background
   const W=canvas.width, H=canvas.height;
-  ctx.fillStyle='#000308'; ctx.fillRect(0,0,W,H);
-  drawStars();
+  const grad = ctx.createLinearGradient(0,0,0,H);
+  grad.addColorStop(0,'#000820'); grad.addColorStop(0.55,'#001840'); grad.addColorStop(1,'#002255');
+  ctx.fillStyle=grad; ctx.fillRect(0,0,W,H);
 
-  drawMoon(W/2, H*0.3, 90);
+  // Stars above horizon
+  ctx.save(); ctx.beginPath(); ctx.rect(0,0,W,H*0.45); ctx.clip(); drawStars(); ctx.restore();
 
-  const gY = H*0.72;
-  ctx.fillStyle='#1e1510'; ctx.fillRect(0,gY,W,H-gY);
-  ctx.fillStyle='#2a1e14';
-  for (let x=0;x<W;x+=48) {
-    ctx.beginPath(); ctx.arc(x+((x*7)%30),gY,12+((x*13)%22),Math.PI,Math.PI*2); ctx.fill();
+  // Earth in sky
+  drawEarth(W*0.8, H*0.18, 38);
+
+  // Ocean surface
+  ctx.strokeStyle='rgba(0,80,180,0.25)'; ctx.lineWidth=1;
+  for (let y=H*0.5;y<H;y+=16) {
+    ctx.beginPath();
+    for (let x=0;x<W;x+=35) {
+      ctx.moveTo(x, y+Math.sin(x*0.06+y*0.03)*2.5);
+      ctx.lineTo(x+18, y+Math.sin((x+18)*0.06+y*0.03)*2.5);
+    }
+    ctx.stroke();
   }
 
-  const px=W/2;
-  ctx.fillStyle='#444'; ctx.fillRect(px-32,gY-5,64,5);
-  drawLEM(px, gY-22, 0, false);
+  // CM floating
+  const wY = H*0.66;
+  ctx.fillStyle='rgba(0,80,180,0.4)';
+  ctx.beginPath(); ctx.ellipse(W/2, wY+6, 18, 7, 0, 0, Math.PI*2); ctx.fill();
+  drawCM(W/2, wY-2);
 
-  // Flag
-  ctx.strokeStyle='#ccc'; ctx.lineWidth=2;
-  ctx.beginPath(); ctx.moveTo(px+40,gY-5); ctx.lineTo(px+40,gY-46); ctx.stroke();
-  ctx.fillStyle='#bb2222'; ctx.fillRect(px+40,gY-46,24,15);
-  // stripes
-  for (let i=0;i<7;i++) {
-    ctx.fillStyle = i%2===0 ? '#cc3333' : '#ffffff';
-    ctx.fillRect(px+40, gY-46+i*2, 24, 2);
-  }
+  // Recovery helicopter/ship hints
+  gtext('USS HORNET', W*0.25, wY-10, {size:9, color:'#ffdd00', align:'center', alpha:0.5});
 
-  gtext('TRANQUILITY BASE', W/2, gY+22, {size:15, align:'center'});
-  gtext('JULY 20, 1969  —  20:17 UTC', W/2, gY+42, {size:11, align:'center', alpha:0.6});
+  gtext('PACIFIC OCEAN', W/2, H-38, {size:15, align:'center'});
+  gtext('JULY 24, 1969  —  12:50 UTC', W/2, H-18, {size:11, align:'center', alpha:0.6});
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -1352,9 +1420,11 @@ function updateDescent(dt) {
       log('eagle', 'Houston… Tranquility Base here. The Eagle has landed.', 0);
       log('capcom', 'Roger, Tranquility. Copy you on the ground. You got a bunch of guys about to turn blue.', 2000);
       log('capcom', 'We\'re breathing again. Thanks a lot.', 4500);
-      log('sys', `SCORE +${bonus} — MISSION ACCOMPLISHED`, 5500);
+      log('sys', `SCORE +${bonus} — FUEL REMAINING: ${ds.fuel.toFixed(0)}%`, 5500);
+      log('eagle', 'Standing by for ascent preparation.', 7000);
+      log('capcom', 'Eagle, rest period approved. Ascent window in T+2 hours. Fuel state is critical.', 8500);
       sfx.success();
-      setTimeout(showVictory, 6000);
+      setTimeout(initAscent, 10000);
     } else {
       ds.crashed = true;
       log('eagle', 'ABORT! ABORT!', 0);
@@ -1564,19 +1634,20 @@ function initDescent() {
 // ═══════════════════════════════════════════════════════════════════════════
 // END STATES
 // ═══════════════════════════════════════════════════════════════════════════
-function showVictory() {
+function showFinalVictory(splashMsg) {
   S.phase = 'victory';
   updateProgress();
   setButtons([]);
   setHint('');
   setKeyHint('');
   document.getElementById('result').classList.add('show');
-  document.getElementById('rtitle').textContent = 'THE EAGLE HAS LANDED';
+  document.getElementById('rtitle').textContent = 'MISSION COMPLETE';
   document.getElementById('rbody').innerHTML =
-    `Mission complete.<br><br>` +
-    `Score: <strong>${S.score}</strong><br>` +
-    `Fuel remaining: ${S.descent.fuel.toFixed(0)}%<br><br>` +
-    `Sea of Tranquility — July 20, 1969`;
+    `Columbia and Eagle are home.<br><br>` +
+    `Final score: <strong>${S.score}</strong><br>` +
+    `Fuel at splashdown: ${S.splashdown.fuel.toFixed(0)}%<br><br>` +
+    (splashMsg || '') +
+    `<br>USS Hornet recovery — July 24, 1969`;
 }
 
 function showResult(success, msg) {
@@ -1602,27 +1673,833 @@ function loop(ts) {
 
   // Update
   switch(S.phase) {
-    case 'launch':  updateLaunch(dt);  break;
-    case 'orbit':   updateOrbit(dt);   break;
-    case 'tli':     updateTLI(dt);     break;
-    case 'coast':   updateCoast(dt);   break;
-    case 'loi':     updateLOI(dt);     break;
-    case 'descent': updateDescent(dt); break;
+    case 'launch':      updateLaunch(dt);      break;
+    case 'orbit':       updateOrbit(dt);       break;
+    case 'tli':         updateTLI(dt);         break;
+    case 'coast':       updateCoast(dt);       break;
+    case 'loi':         updateLOI(dt);         break;
+    case 'descent':     updateDescent(dt);     break;
+    case 'ascent':      updateAscent(dt);      break;
+    case 'rendezvous':  updateRendezvous(dt);  break;
+    case 'tei':         updateTEI(dt);         break;
+    case 'reentry':     updateReentry(dt);     break;
+    case 'splashdown':  updateSplashdown(dt);  break;
   }
 
   // Draw
   resize();
   switch(S.phase) {
-    case 'launch':  drawLaunch();  break;
-    case 'orbit':   drawOrbit();   break;
-    case 'tli':     drawTLI();     break;
-    case 'coast':   drawCoast();   break;
-    case 'loi':     drawLOI();     break;
-    case 'descent': drawDescent(); break;
-    case 'victory': drawVictory(); break;
+    case 'launch':      drawLaunch();      break;
+    case 'orbit':       drawOrbit();       break;
+    case 'tli':         drawTLI();         break;
+    case 'coast':       drawCoast();       break;
+    case 'loi':         drawLOI();         break;
+    case 'descent':     drawDescent();     break;
+    case 'ascent':      drawAscent();      break;
+    case 'rendezvous':  drawRendezvous();  break;
+    case 'tei':         drawTEI();         break;
+    case 'reentry':     drawReentry();     break;
+    case 'splashdown':  drawSplashdown();  break;
+    case 'victory':     drawVictory();     break;
   }
 
   RAF = requestAnimationFrame(loop);
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// RETURN-JOURNEY DRAW HELPERS
+// ═══════════════════════════════════════════════════════════════════════════
+function drawLEMAscent(cx, cy, thrustOn) {
+  ctx.save(); ctx.translate(cx, cy);
+  // Body
+  ctx.fillStyle = '#d4c070'; ctx.fillRect(-10, -20, 20, 24);
+  // Top dome
+  ctx.fillStyle = '#c8b460';
+  ctx.beginPath(); ctx.arc(0, -20, 10, Math.PI, 0); ctx.fill();
+  // Window
+  ctx.fillStyle = '#88aaff';
+  ctx.beginPath(); ctx.arc(-3, -22, 4, 0, Math.PI*2); ctx.fill();
+  // Antenna
+  ctx.strokeStyle='#eee'; ctx.lineWidth=1;
+  ctx.beginPath(); ctx.moveTo(-4,-30); ctx.lineTo(-8,-40); ctx.stroke();
+  // RCS pods
+  ctx.fillStyle='#aa8830';
+  ctx.fillRect(-15,-13, 4, 4);
+  ctx.fillRect( 11,-13, 4, 4);
+  // Engine
+  ctx.fillStyle='#777'; ctx.fillRect(-5,4,10,6);
+  if (thrustOn) {
+    const h = 12 + Math.random()*10;
+    const gf = ctx.createLinearGradient(0,10,0,10+h);
+    gf.addColorStop(0,'#fff'); gf.addColorStop(0.3,'#ffcc00'); gf.addColorStop(1,'transparent');
+    ctx.fillStyle=gf;
+    ctx.beginPath(); ctx.moveTo(-5,10); ctx.lineTo(0,10+h); ctx.lineTo(5,10); ctx.fill();
+  }
+  ctx.restore();
+}
+
+function drawCSM(cx, cy) {
+  ctx.save(); ctx.translate(cx, cy);
+  // SM (cylinder)
+  ctx.fillStyle='#aaaacc'; ctx.fillRect(-8,-20,16,28);
+  // CM (cone)
+  ctx.fillStyle='#cccccc';
+  ctx.beginPath(); ctx.moveTo(-8,8); ctx.lineTo(8,8); ctx.lineTo(4,-20); ctx.lineTo(-4,-20); ctx.fill();
+  ctx.fillStyle='#88aaff';
+  ctx.beginPath(); ctx.arc(0,-10,3,0,Math.PI*2); ctx.fill();
+  // Docking port
+  ctx.strokeStyle='#ffff00'; ctx.lineWidth=2;
+  ctx.beginPath(); ctx.arc(0,-20,4,0,Math.PI*2); ctx.stroke();
+  ctx.restore();
+}
+
+function drawCM(cx, cy) {
+  ctx.save(); ctx.translate(cx, cy);
+  ctx.fillStyle='#999'; ctx.beginPath();
+  ctx.moveTo(-12,10); ctx.lineTo(12,10); ctx.lineTo(6,-14); ctx.lineTo(-6,-14); ctx.fill();
+  ctx.fillStyle='#88aaff'; ctx.beginPath(); ctx.arc(0,-2,4,0,Math.PI*2); ctx.fill();
+  ctx.restore();
+}
+
+function drawCMChutes(cx, cy) {
+  const chuteColors = ['#cc3333','#ffffff','#cc3333'];
+  for (let i=-1; i<=1; i++) {
+    ctx.fillStyle = chuteColors[i+1];
+    ctx.beginPath(); ctx.ellipse(cx+i*26, cy-48, 17, 24, 0, Math.PI, 0); ctx.fill();
+    ctx.strokeStyle='rgba(180,180,180,0.5)'; ctx.lineWidth=0.8; ctx.stroke();
+    // Shroud lines
+    ctx.strokeStyle='rgba(200,200,200,0.4)'; ctx.lineWidth=0.5;
+    for (let j=-2; j<=2; j++) {
+      ctx.beginPath(); ctx.moveTo(cx+i*26+j*3, cy-24); ctx.lineTo(cx, cy-8); ctx.stroke();
+    }
+  }
+  drawCM(cx, cy);
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// PHASE 7 — LUNAR ASCENT
+// ═══════════════════════════════════════════════════════════════════════════
+function drawAscent() {
+  const W=canvas.width, H=canvas.height, as=S.ascent;
+  ctx.fillStyle='#000308'; ctx.fillRect(0,0,W,H);
+  drawStars();
+
+  // Moon surface at bottom
+  const groundY = H - 50;
+  ctx.fillStyle='#1e1510'; ctx.fillRect(0,groundY,W,H-groundY);
+  ctx.fillStyle='#2a1e14';
+  for (let x=0;x<W;x+=52) {
+    ctx.beginPath(); ctx.arc(x+((x*7)%30),groundY,14+((x*13)%24),Math.PI,Math.PI*2); ctx.fill();
+  }
+
+  // Target orbit line
+  const orbitLineY = H - as.orbitAlt;
+  ctx.strokeStyle='rgba(255,221,0,0.5)'; ctx.lineWidth=1; ctx.setLineDash([8,6]);
+  ctx.beginPath(); ctx.moveTo(0,orbitLineY); ctx.lineTo(W,orbitLineY); ctx.stroke();
+  ctx.setLineDash([]);
+  gtext('ORBIT INSERTION ALTITUDE', W-10, orbitLineY-6, {size:9, color:'#ffdd00', align:'right', alpha:0.7});
+
+  // LEM ascent stage
+  const lemY = groundY - as.y;
+  const thrustOn = as.active && (S.keys['ArrowUp']||S.keys[' ']) && as.fuel > 0;
+  drawLEMAscent(W/2 + as.x, lemY, thrustOn);
+
+  // Descent stage remains on surface (abandoned)
+  ctx.save(); ctx.translate(W/2, groundY-2);
+  ctx.fillStyle='#4a3820'; ctx.fillRect(-14,0,28,10);
+  ctx.strokeStyle='#7a5830'; ctx.lineWidth=1;
+  ctx.beginPath(); ctx.moveTo(-14,0); ctx.lineTo(-28,10); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(14,0); ctx.lineTo(28,10); ctx.stroke();
+  ctx.restore();
+
+  // Fuel bar — BIG and prominent
+  const fuelRatio = as.fuel / 100;
+  const barW = Math.min(W*0.35, 240), barH = 20;
+  const barX = (W-barW)/2, barY = 16;
+  ctx.fillStyle='rgba(0,10,2,0.8)'; ctx.fillRect(barX-2,barY-2,barW+4,barH+4);
+  ctx.strokeStyle = as.fuel<20 ? '#ff3300' : as.fuel<40 ? '#ffdd00' : '#00ff41';
+  ctx.lineWidth=1; ctx.strokeRect(barX-2,barY-2,barW+4,barH+4);
+  ctx.fillStyle = as.fuel<20 ? '#ff3300' : as.fuel<40 ? '#ffdd00' : '#00ff41';
+  ctx.fillRect(barX, barY, barW*fuelRatio, barH);
+  gtext('ASCENT FUEL', W/2, barY+barH+14, {size:10, color: ctx.strokeStyle, align:'center',
+    glow: as.fuel < 20});
+  if (as.fuel < 20) {
+    gtext('⚠ CRITICAL ⚠', W/2, barY+barH+28, {size:11, color:'#ff3300', align:'center'});
+  }
+
+  // In-corridor flash
+  if (as.y >= as.orbitAlt * 0.95) {
+    gtext('▶  ORBIT ALTITUDE REACHED  ◀', W/2, orbitLineY-22, {size:13, color:'#ffdd00', align:'center'});
+  }
+}
+
+function updateAscent(dt) {
+  const as = S.ascent;
+  if (!as.active || as.reached) return;
+
+  const GRAVITY = 18;    // moon gravity (px/s²)
+  const THRUST  = 50;    // thrust force (px/s²)
+  const FUEL_RATE = 4.5; // % per second of thrust
+
+  const thrusting = (S.keys['ArrowUp']||S.keys[' ']) && as.fuel > 0;
+  if (thrusting) {
+    as.vy += THRUST * dt;
+    as.fuel = Math.max(0, as.fuel - FUEL_RATE*dt);
+    S.fuel = as.fuel;
+    as.thrustTime += dt;
+  }
+  as.vy -= GRAVITY * dt;
+
+  // Slight horizontal drift from initial velocity
+  as.y += as.vy * dt;
+  as.x += as.vx * dt;
+
+  // Ground check
+  if (as.y < 0) { as.y = 0; as.vy = 0; }
+
+  // Fuel exhausted and falling back
+  if (as.fuel <= 0 && as.vy < 0 && as.y < as.orbitAlt * 0.7) {
+    log('eagle', 'FUEL DEPLETED. Unable to reach orbit.', 0);
+    log('capcom', 'Eagle, we show fuel depletion. Abort abort abort.', 800);
+    sfx.fail();
+    setTimeout(() => showResult(false,
+      `ASCENT ABORT — Insufficient fuel to reach orbit.<br><br>` +
+      `Ascent fuel was: ${as.fuel.toFixed(0)}% at abort.<br>` +
+      `Score: ${S.score}`), 2000);
+    as.reached = true; // prevent re-trigger
+    return;
+  }
+
+  // Reached target orbit altitude
+  if (as.y >= as.orbitAlt && !as.reached) {
+    as.reached = true;
+    as.vy = 0;
+    const bonus = Math.round(200 + as.fuel * 4);
+    S.score += bonus;
+    S.fuel = as.fuel;
+    log('eagle', 'Ascent stage in orbit! Fuel remaining: ' + as.fuel.toFixed(0) + '%.', 0);
+    log('capcom', `Outstanding, Eagle. Score +${bonus}. Initiate rendezvous sequence.`, 1000);
+    sfx.success();
+    setTimeout(() => initRendezvous(), 3000);
+  }
+
+  updateTelemetry({
+    alt: as.y * 1000 / as.orbitAlt * 110,
+    vel: as.vy * 30,
+    fuel: as.fuel,
+    thr: thrusting ? 100 : 0,
+    extra: { label:'ASCENT FUEL', value: as.fuel.toFixed(0)+'%',
+             warn: as.fuel<40, crit: as.fuel<20 },
+  });
+}
+
+function initAscent() {
+  S.phase = 'ascent';
+  const H = canvas.height;
+  const as = S.ascent;
+  as.active = true;
+  as.y = 0;
+  as.vy = 0;
+  as.vx = (Math.random()-0.5)*0.5;
+  as.fuel = S.fuel;
+  as.orbitAlt = H * 0.62;
+  as.reached = false;
+  as.x = 0;
+
+  updateProgress();
+  setKeyHint('↑ / SPACE = ASCENT ENGINE');
+  log('sys', 'ASCENT ENGINE ARMED', 0);
+  log('eagle', 'Ascent stage prepped. Descent stage jettisoned.', 800);
+  log('capcom', `Eagle, you are GO for ascent. Fuel state: ${S.fuel.toFixed(0)}%. Hold ↑ to thrust.`, 2000);
+  if (S.fuel < 30) {
+    log('sys', `⚠ CRITICAL FUEL — ${S.fuel.toFixed(0)}% REMAINING. ASCENT MARGINAL.`, 3500);
+  }
+
+  setButtons([]);
+  setHint('↑ / SPACE — hold to thrust — reach the yellow orbit line');
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// PHASE 8 — RENDEZVOUS & DOCKING
+// ═══════════════════════════════════════════════════════════════════════════
+function drawRendezvous() {
+  const W=canvas.width, H=canvas.height, rv=S.rendezvous;
+  ctx.fillStyle='#000308'; ctx.fillRect(0,0,W,H);
+  drawStars();
+
+  const cx=W/2, cy=H/2, rx=W*0.28, ry=H*0.28;
+  drawMoon(cx, cy, 55);
+
+  // Orbit path
+  ctx.strokeStyle='rgba(0,255,65,0.18)'; ctx.lineWidth=1; ctx.setLineDash([3,7]);
+  ctx.beginPath(); ctx.ellipse(cx,cy,rx,ry,0,0,Math.PI*2); ctx.stroke();
+  ctx.setLineDash([]);
+
+  const toCanvas = deg => ({ x: cx+Math.cos((deg-90)*Math.PI/180)*rx, y: cy+Math.sin((deg-90)*Math.PI/180)*ry });
+
+  // CSM (auto-orbiting)
+  const csmPos = toCanvas(rv.csmAngle);
+  ctx.shadowColor='#ffdd00'; ctx.shadowBlur=14;
+  ctx.fillStyle='#ffdd00';
+  ctx.beginPath(); ctx.arc(csmPos.x,csmPos.y,5,0,Math.PI*2); ctx.fill();
+  ctx.shadowBlur=0;
+  gtext('CSM', csmPos.x+8, csmPos.y-8, {size:10, color:'#ffdd00', alpha:0.8});
+
+  // LEM ascent stage
+  const lemPos = toCanvas(rv.lemAngle);
+  ctx.fillStyle='#00ff41'; ctx.shadowColor='#00ff41'; ctx.shadowBlur=12;
+  ctx.beginPath(); ctx.arc(lemPos.x,lemPos.y,5,0,Math.PI*2); ctx.fill();
+  ctx.shadowBlur=0;
+  gtext('EAGLE', lemPos.x+8, lemPos.y+14, {size:10});
+
+  // Angular separation
+  let sep = ((rv.csmAngle - rv.lemAngle) % 360 + 360) % 360;
+  if (sep > 180) sep = 360 - sep;
+
+  // Rendezvous window (CSM ± winSize)
+  const wsA = (rv.csmAngle - rv.winSize - 90) * Math.PI/180;
+  const weA = (rv.csmAngle + rv.winSize - 90) * Math.PI/180;
+  ctx.strokeStyle='rgba(255,221,0,0.55)'; ctx.lineWidth=6; ctx.lineCap='round';
+  ctx.beginPath(); ctx.ellipse(cx,cy,rx,ry,0,wsA,weA); ctx.stroke();
+
+  // Distance line
+  ctx.strokeStyle='rgba(0,255,65,0.3)'; ctx.lineWidth=1; ctx.setLineDash([4,4]);
+  ctx.beginPath(); ctx.moveTo(lemPos.x,lemPos.y); ctx.lineTo(csmPos.x,csmPos.y); ctx.stroke();
+  ctx.setLineDash([]);
+
+  gtext(`SEPARATION: ${sep.toFixed(0)}°`, W/2, H-22, {size:11, align:'center',
+    color: sep<=rv.winSize ? '#ffdd00' : '#00ff41', alpha:0.8});
+  gtext(`FUEL: ${S.fuel.toFixed(0)}%`, 14, H-22, {size:11, color: S.fuel<20?'#ff3300':S.fuel<40?'#ffdd00':'#00ff41'});
+}
+
+function updateRendezvous(dt) {
+  const rv = S.rendezvous;
+  if (rv.docked) return;
+
+  rv.csmAngle = (rv.csmAngle + rv.csmSpeed*dt) % 360;
+  rv.lemAngle = (rv.lemAngle + rv.csmSpeed*dt) % 360; // LEM stays behind until burn
+
+  updateTelemetry({
+    alt: 110000, vel: 1620, fuel: S.fuel, thr: 0,
+    extra: {
+      label: 'CSM POSITION',
+      value: rv.csmAngle.toFixed(0) + '°',
+    },
+  });
+}
+
+function doRendezvousBurn() {
+  const rv = S.rendezvous;
+  if (rv.docked) return;
+  rv.docked = true;
+
+  let sep = ((rv.csmAngle - rv.lemAngle) % 360 + 360) % 360;
+  if (sep > 180) sep = 360-sep;
+
+  const inWin = sep <= rv.winSize;
+  const acc = inWin ? Math.max(0, 1 - sep/rv.winSize) : 0;
+
+  if (inWin) {
+    const bonus = Math.round(acc * 500);
+    S.score += bonus;
+    S.fuel = Math.max(0, S.fuel - 5 - (1-acc)*10);
+    log('eagle', 'Rendezvous burn complete. Closing on Columbia.', 0);
+    log('eagle', 'Docking confirmed! We are GO for TEI.', 2000);
+    log('sys', `SCORE +${bonus} — DOCKED`, 2500);
+    sfx.success();
+  } else {
+    const penalty = Math.round(sep * 0.3);
+    S.fuel = Math.max(0, S.fuel - 8 - penalty * 0.3);
+    log('eagle', 'Off-intercept. RCS correcting.', 0);
+    log('capcom', `Docking achieved with correction. Fuel consumed. Penalty.`, 1000);
+    sfx.fail();
+  }
+
+  setButtons([]);
+  setTimeout(() => initTEI(), 3500);
+}
+
+function initRendezvous() {
+  S.phase = 'rendezvous';
+  S.rendezvous = {
+    lemAngle: 185,
+    csmAngle:  10,
+    csmSpeed:  22,
+    winSize:   24,
+    docked: false,
+  };
+  updateProgress();
+  setKeyHint('');
+  log('sys', 'RENDEZVOUS SEQUENCE INITIATED', 0);
+  log('eagle', 'We have visual on Columbia. Beginning intercept.', 1000);
+  log('capcom', 'Eagle, execute rendezvous burn when LEM enters the YELLOW window around CSM.', 2200);
+
+  setButtons([{ label:'[ EXECUTE RENDEZVOUS BURN ]', pulse:true,
+    action() { doRendezvousBurn(); }
+  }]);
+  setHint('Click when Eagle (green) is in the yellow arc near Columbia');
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// PHASE 9 — TRANS-EARTH INJECTION
+// ═══════════════════════════════════════════════════════════════════════════
+function drawTEI() {
+  const W=canvas.width, H=canvas.height, ts=S.tei;
+  ctx.fillStyle='#000308'; ctx.fillRect(0,0,W,H);
+  drawStars();
+
+  const cx=W*0.62, cy=H/2, rx=W*0.23, ry=H*0.27;
+  drawMoon(cx, cy, 55);
+  // Earth far left
+  drawEarth(W*0.08, cy, 28);
+
+  // Orbit
+  ctx.strokeStyle='rgba(0,255,65,0.18)'; ctx.lineWidth=1; ctx.setLineDash([3,7]);
+  ctx.beginPath(); ctx.ellipse(cx,cy,rx,ry,0,0,Math.PI*2); ctx.stroke();
+  ctx.setLineDash([]);
+
+  // Burn window
+  const toRad = d => (d-90)*Math.PI/180;
+  const wsA=toRad(ts.winStart), weA=toRad(ts.winEnd);
+  ctx.strokeStyle='rgba(255,221,0,0.7)'; ctx.lineWidth=7; ctx.lineCap='round';
+  ctx.beginPath(); ctx.ellipse(cx,cy,rx,ry,0,wsA,weA); ctx.stroke();
+
+  const midA = toRad((ts.winStart+ts.winEnd)/2);
+  const lx=cx+Math.cos(midA)*(rx+24), ly=cy+Math.sin(midA)*(ry+24);
+  gtext('TEI', lx, ly,    {size:10, color:'#ffdd00', align:'center', alpha:0.85});
+  gtext('BURN',lx, ly+14, {size:10, color:'#ffdd00', align:'center', alpha:0.85});
+
+  // Spacecraft
+  const sa = toRad(ts.angle);
+  const sx=cx+Math.cos(sa)*rx, sy=cy+Math.sin(sa)*ry;
+  ctx.fillStyle='#00ff41'; ctx.shadowColor='#00ff41'; ctx.shadowBlur=14;
+  ctx.beginPath(); ctx.arc(sx,sy,4,0,Math.PI*2); ctx.fill(); ctx.shadowBlur=0;
+
+  // Post-burn arc to Earth
+  if (ts.burned) {
+    ctx.strokeStyle='rgba(0,255,65,0.6)'; ctx.lineWidth=1; ctx.setLineDash([5,6]);
+    ctx.beginPath(); ctx.moveTo(sx,sy);
+    ctx.bezierCurveTo(cx-150,cy-180, W*0.3, cy-60, W*0.08, cy);
+    ctx.stroke(); ctx.setLineDash([]);
+  }
+
+  gtext(`FUEL: ${S.fuel.toFixed(0)}%`, 14, H-22, {size:11,
+    color: S.fuel<20?'#ff3300':S.fuel<40?'#ffdd00':'#00ff41'});
+}
+
+function updateTEI(dt) {
+  const ts = S.tei;
+  if (ts.burned) return;
+  ts.angle = (ts.angle + ts.speed*dt) % 360;
+
+  const a = ((ts.angle%360)+360)%360;
+  const inWin = a >= ts.winStart && a <= ts.winEnd;
+  const btn = document.querySelector('#btns .btn');
+  if (btn) {
+    if (inWin) { btn.classList.remove('off'); btn.classList.add('pulse'); }
+    else        { btn.classList.add('off');    btn.classList.remove('pulse'); }
+  }
+
+  updateTelemetry({
+    alt: 111000, vel:1620, fuel:S.fuel, thr:0,
+    extra:{ label:'ORBITAL POSITION', value: a.toFixed(0)+'° / TARGET 130–200°', warn:inWin },
+  });
+}
+
+function doTEIBurn() {
+  const ts = S.tei;
+  if (ts.burned) return;
+  ts.burned = true;
+
+  const a = ((ts.angle%360)+360)%360;
+  const inWin = a >= ts.winStart && a <= ts.winEnd;
+  const mid=(ts.winStart+ts.winEnd)/2;
+  const acc = inWin ? Math.max(0, 1 - Math.abs(a-mid)/((ts.winEnd-ts.winStart)/2)) : 0;
+
+  const fuelCost = inWin ? 8 + (1-acc)*5 : 18;
+  S.fuel = Math.max(0, S.fuel - fuelCost);
+
+  if (inWin) {
+    const bonus = Math.round(acc*500);
+    S.score += bonus;
+    log('eagle', 'TEI burn complete. We\'re coming home!', 0);
+    log('sys', `SCORE +${bonus} — TRANSEARTH TRAJECTORY CONFIRMED`, 400);
+    sfx.success();
+  } else {
+    log('eagle', 'TEI burn off-window. Mid-course will correct.', 0);
+    log('capcom', 'Copy. Fuel penalty applied. You are on a return trajectory.', 600);
+    sfx.fail();
+  }
+
+  setButtons([]);
+  setTimeout(() => initReentry(), 3200);
+}
+
+function initTEI() {
+  S.phase = 'tei';
+  S.tei = { angle:0, speed:20, winStart:130, winEnd:200, burned:false };
+  updateProgress();
+  log('sys', 'TRANS-EARTH INJECTION SEQUENCE', 0);
+  log('eagle', 'Ready for TEI burn. Awaiting your mark.', 1000);
+  log('capcom', 'Columbia, execute TEI when you enter the burn window. Fuel state critical.', 2200);
+  if (S.fuel < 25) log('sys', `⚠ FUEL CRITICAL: ${S.fuel.toFixed(0)}% — TEI BURN WILL LEAVE MINIMAL MARGIN`, 3500);
+
+  setButtons([{ label:'[ EXECUTE TEI BURN ]', off:true,
+    action() { doTEIBurn(); }
+  }]);
+  setHint('Click when spacecraft enters the YELLOW window');
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// PHASE 10 — REENTRY
+// ═══════════════════════════════════════════════════════════════════════════
+function drawReentry() {
+  const W=canvas.width, H=canvas.height, re=S.reentry;
+  ctx.fillStyle='#000308'; ctx.fillRect(0,0,W,H);
+  drawStars();
+
+  // Earth growing
+  const earthR = 40 + re.t * 130;
+  drawEarth(W/2, H + earthR*0.4, earthR);
+
+  // CM descending
+  const cmY = H*0.7 - re.t*H*0.5;
+  const entryAngle = re.entered ? re.angle + 90 : 0; // tip forward during entry
+
+  // Plasma glow during entry
+  if (re.entered) {
+    const plasma = ctx.createRadialGradient(W/2, cmY+20, 5, W/2, cmY+20, 50+re.heat*0.5);
+    plasma.addColorStop(0, `rgba(255,${Math.round(120-re.heat)},0,${0.4+re.heat*0.005})`);
+    plasma.addColorStop(1, 'transparent');
+    ctx.fillStyle = plasma;
+    ctx.beginPath(); ctx.arc(W/2, cmY+20, 50+re.heat*0.5, 0, Math.PI*2); ctx.fill();
+  }
+
+  drawCM(W/2, cmY);
+
+  // Entry angle gauge (left side)
+  const gx=28, gt=H*0.1, gb=H*0.9, gh=gb-gt;
+  ctx.fillStyle='rgba(0,10,2,0.6)'; ctx.fillRect(gx,gt,32,gh);
+  ctx.strokeStyle='rgba(0,255,65,0.2)'; ctx.lineWidth=1; ctx.strokeRect(gx,gt,32,gh);
+
+  // Corridor (5.2° – 7.8°)
+  const aRange=10; // degrees shown
+  const yCor_top = gt + ((re.corHi - 0) / aRange) * gh;  // steeper = higher on gauge
+  const yCor_bot = gt + ((re.corLo - 0) / aRange) * gh;
+  ctx.fillStyle='rgba(255,221,0,0.25)'; ctx.fillRect(gx+2,gt+(10-re.corHi)/aRange*gh,28,(re.corHi-re.corLo)/aRange*gh);
+  ctx.strokeStyle='rgba(255,221,0,0.6)'; ctx.lineWidth=1;
+  ctx.strokeRect(gx+2, gt+(10-re.corHi)/aRange*gh, 28, (re.corHi-re.corLo)/aRange*gh);
+
+  // Needle
+  const nY = gt + (10-re.angle)/aRange*gh;
+  const nColor = (re.angle>=re.corLo && re.angle<=re.corHi) ? '#00ff41' : '#ff3300';
+  ctx.strokeStyle=nColor; ctx.lineWidth=2;
+  ctx.shadowColor=nColor; ctx.shadowBlur=8;
+  ctx.beginPath(); ctx.moveTo(gx,nY); ctx.lineTo(gx+32,nY); ctx.stroke();
+  ctx.shadowBlur=0;
+  ctx.fillStyle=nColor;
+  ctx.beginPath(); ctx.moveTo(gx+32,nY); ctx.lineTo(gx+42,nY-5); ctx.lineTo(gx+42,nY+5); ctx.fill();
+
+  gtext('ANGLE', gx+16, gt-10, {size:9, align:'center', alpha:0.6});
+  gtext(re.corHi+'°', gx+16, gt+(10-re.corHi)/aRange*gh-3, {size:8, color:'#ffdd00', align:'center', alpha:0.7});
+  gtext(re.corLo+'°', gx+16, gt+(10-re.corLo)/aRange*gh+10, {size:8, color:'#ffdd00', align:'center', alpha:0.7});
+  gtext(re.angle.toFixed(1)+'°', gx+16, nY+(nY>gt+gh/2?-6:14), {size:10, color:nColor, align:'center'});
+
+  // Heat gauge (bottom)
+  if (re.entered) {
+    const hW=W*0.4, hX=(W-hW)/2, hY=H-28;
+    ctx.fillStyle='rgba(0,0,0,0.7)'; ctx.fillRect(hX,hY,hW,14);
+    const hColor = re.heat>70?'#ff3300': re.heat>40?'#ff8800':'#ffcc00';
+    ctx.fillStyle=hColor; ctx.fillRect(hX,hY,hW*re.heat/100,14);
+    ctx.strokeStyle='rgba(255,100,0,0.5)'; ctx.lineWidth=1; ctx.strokeRect(hX,hY,hW,14);
+    gtext('HEAT SHIELD', W/2, hY-5, {size:9, color:hColor, align:'center', alpha:0.8});
+  }
+
+  // Countdown
+  if (re.countdown > 0 && !re.entered) {
+    gtext(`ATMOSPHERE ENTRY IN ${re.countdown.toFixed(0)}s`, W/2, H*0.25,
+      {size:14, color:'#ffdd00', align:'center'});
+    gtext('ADJUST ENTRY ANGLE TO CORRIDOR', W/2, H*0.25+22, {size:11, align:'center', alpha:0.7});
+  }
+
+  if (re.skip) gtext('SKIPPING OFF ATMOSPHERE — LOST IN SPACE', W/2, H/2, {size:14, color:'#ff3300', align:'center'});
+
+  gtext(`FUEL: ${S.fuel.toFixed(0)}%`, W-14, H-22, {size:11, align:'right',
+    color: S.fuel<10?'#ff3300':S.fuel<25?'#ffdd00':'#00ff41'});
+}
+
+function updateReentry(dt) {
+  const re = S.reentry;
+  if (re.entered || re.skip) return;
+
+  re.t = Math.min(re.t + dt*0.022, 1);
+
+  // Natural angle drift
+  re.angle += (Math.random()-0.49)*0.3*dt*60;
+
+  // Player corrections (costs fuel)
+  const corrRate = 1.5;
+  if (S.keys['ArrowUp']   && S.fuel>0) { re.angle = Math.min(re.angle+corrRate*dt, 9.5); S.fuel=Math.max(0,S.fuel-1.5*dt); }
+  if (S.keys['ArrowDown'] && S.fuel>0) { re.angle = Math.max(re.angle-corrRate*dt, 2.0); S.fuel=Math.max(0,S.fuel-1.5*dt); }
+  re.angle = Math.max(2.0, Math.min(9.5, re.angle));
+
+  // Start countdown when approaching
+  if (re.t > 0.55 && re.countdown < 0) re.countdown = 8;
+  if (re.countdown > 0) re.countdown -= dt;
+
+  // Entry!
+  if (re.countdown <= 0 && re.t > 0.55) {
+    re.entered = true;
+    const inCorridor = re.angle >= re.corLo && re.angle <= re.corHi;
+
+    if (!inCorridor) {
+      if (re.angle > re.corHi) {
+        // Too steep
+        log('capcom', 'ANGLE TOO STEEP — OVERHEAT IMMINENT', 0);
+        sfx.fail();
+        re.heat = 100;
+        setTimeout(() => showResult(false,
+          `REENTRY OVERHEAT — entry angle ${re.angle.toFixed(1)}° exceeded safe limit of ${re.corHi}°<br><br>Score: ${S.score}`), 2500);
+      } else {
+        // Too shallow
+        re.skip = true;
+        log('capcom', 'ANGLE TOO SHALLOW — SKIPPING OFF ATMOSPHERE', 0);
+        sfx.fail();
+        setTimeout(() => showResult(false,
+          `REENTRY SKIP — entry angle ${re.angle.toFixed(1)}° below minimum corridor ${re.corLo}°<br><br>Score: ${S.score}`), 2500);
+      }
+      return;
+    }
+
+    const acc = 1 - Math.abs(re.angle - re.target) / ((re.corHi - re.corLo)/2);
+    const bonus = Math.round(acc * 600);
+    S.score += bonus;
+    log('capcom', `Reentry confirmed. Angle: ${re.angle.toFixed(1)}°. Nominal corridor.`, 0);
+    log('sys', `SCORE +${bonus} — REENTRY NOMINAL`, 500);
+    sfx.success();
+    setTimeout(() => initSplashdown(), 4000);
+  }
+
+  // Heat build-up when entered
+  if (re.entered && re.angle > re.corHi) {
+    re.heat = Math.min(100, re.heat + 30*dt);
+    if (re.heat >= 100) {
+      showResult(false, `HEAT SHIELD FAILURE — Score: ${S.score}`);
+    }
+  }
+
+  updateTelemetry({
+    alt: (1-re.t)*400000,
+    vel: 11000 - re.t*8000,
+    fuel: S.fuel,
+    thr: 0,
+    extra: {
+      label: 'ENTRY ANGLE',
+      value: re.angle.toFixed(1)+'° (CORRIDOR: '+re.corLo+'–'+re.corHi+'°)',
+      warn: re.angle < re.corLo || re.angle > re.corHi,
+      crit: re.angle < re.corLo-1 || re.angle > re.corHi+0.5,
+    },
+  });
+}
+
+function initReentry() {
+  S.phase = 'reentry';
+  S.reentry = {
+    t: 0, angle: 7.2, target: 6.5,
+    corLo: 5.2, corHi: 7.8,
+    atmos: false, heat: 0, skip: false, entered: false, countdown: -1,
+  };
+  updateProgress();
+  setKeyHint('↑ = steeper\n↓ = shallower');
+  log('sys', 'ENTRY INTERFACE APPROACHING', 0);
+  log('eagle', 'Entry corridor confirmed. CM separation in progress.', 1000);
+  log('capcom', 'Columbia, keep entry angle between 5.2° and 7.8°. Use ↑↓ to correct. Fuel costs.', 2500);
+
+  setButtons([]);
+  setHint('↑/↓ adjust entry angle — stay in the YELLOW corridor');
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// PHASE 11 — SPLASHDOWN
+// ═══════════════════════════════════════════════════════════════════════════
+function drawSplashdown() {
+  const W=canvas.width, H=canvas.height, sp=S.splashdown;
+  // Ocean
+  const grad = ctx.createLinearGradient(0,0,0,H);
+  grad.addColorStop(0,'#000820');
+  grad.addColorStop(0.5,'#001840');
+  grad.addColorStop(1,'#002255');
+  ctx.fillStyle=grad; ctx.fillRect(0,0,W,H);
+
+  // Ocean surface ripples
+  ctx.strokeStyle='rgba(0,80,180,0.3)'; ctx.lineWidth=1;
+  for (let y=H*0.45;y<H;y+=18) {
+    ctx.beginPath();
+    for (let x=0;x<W;x+=40) {
+      ctx.moveTo(x,y+Math.sin(x*0.05+y*0.02)*3);
+      ctx.lineTo(x+20,y+Math.sin((x+20)*0.05+y*0.02)*3);
+    }
+    ctx.stroke();
+  }
+
+  // Stars (above horizon)
+  ctx.save();
+  ctx.beginPath(); ctx.rect(0,0,W,H*0.45); ctx.clip();
+  drawStars();
+  ctx.restore();
+
+  // Horizon glow
+  const horizGrad = ctx.createLinearGradient(0,H*0.35,0,H*0.55);
+  horizGrad.addColorStop(0,'transparent');
+  horizGrad.addColorStop(0.5,'rgba(20,80,180,0.3)');
+  horizGrad.addColorStop(1,'transparent');
+  ctx.fillStyle=horizGrad; ctx.fillRect(0,H*0.35,W,H*0.2);
+
+  // Target zone (USS Hornet)
+  const tx=sp.targetX, ty=sp.targetY;
+  const dist = Math.sqrt((sp.x-tx)**2+(sp.y-ty)**2);
+  const inZone = dist < 60;
+  ctx.strokeStyle = inZone ? '#00ff41' : 'rgba(255,221,0,0.6)';
+  ctx.lineWidth = inZone ? 2 : 1;
+  ctx.setLineDash([6,4]);
+  ctx.beginPath(); ctx.arc(tx,ty,60,0,Math.PI*2); ctx.stroke();
+  ctx.setLineDash([]);
+  ctx.strokeStyle='rgba(255,221,0,0.3)'; ctx.lineWidth=1;
+  ctx.beginPath(); ctx.arc(tx,ty,120,0,Math.PI*2); ctx.stroke();
+  gtext('USS HORNET', tx, ty+8, {size:10, color:'#ffdd00', align:'center', alpha:0.7});
+
+  // Wind arrow
+  gtext('WIND', W-50, 30, {size:9, alpha:0.5});
+  ctx.strokeStyle='rgba(100,150,255,0.7)'; ctx.lineWidth=2;
+  ctx.beginPath(); ctx.moveTo(W-30,46); ctx.lineTo(W-30+sp.vx*8, 46+sp.vy*2); ctx.stroke();
+
+  // CM with chutes
+  if (!sp.landed) drawCMChutes(sp.x, sp.y);
+
+  // Splashed down CM
+  if (sp.landed) {
+    ctx.fillStyle='rgba(0,100,200,0.5)';
+    ctx.beginPath(); ctx.ellipse(sp.x, sp.y+4, 16, 6, 0, 0, Math.PI*2); ctx.fill();
+    drawCM(sp.x, sp.y-2);
+  }
+
+  // Fuel display (prominent — this is the final gauge)
+  const fuelPct = sp.fuel;
+  gtext(`FUEL: ${fuelPct.toFixed(0)}%`, W/2, H-22, {size:11, align:'center',
+    color: fuelPct<10?'#ff3300':fuelPct<20?'#ffdd00':'#00ff41'});
+  gtext(`DISTANCE TO HORNET: ${dist.toFixed(0)} m`, W/2, H-40, {size:11, align:'center',
+    color: inZone?'#00ff41':'#ffdd00', alpha:0.8});
+
+  if (inZone && !sp.landed) {
+    gtext('▶  IN RECOVERY ZONE — SPLASHDOWN CONFIRMED  ◀', W/2, H*0.42,
+      {size:12, color:'#00ff41', align:'center'});
+  }
+}
+
+function updateSplashdown(dt) {
+  const sp = S.splashdown;
+  if (sp.landed) return;
+
+  // Fall
+  sp.y += sp.vy * dt;
+
+  // Wind drift (player can counter with ←→, uses fuel)
+  const corrRate = 28;
+  if (S.keys['ArrowLeft']  && sp.fuel>0) { sp.vx -= corrRate*dt; sp.fuel=Math.max(0,sp.fuel-2*dt); }
+  if (S.keys['ArrowRight'] && sp.fuel>0) { sp.vx += corrRate*dt; sp.fuel=Math.max(0,sp.fuel-2*dt); }
+  S.fuel = sp.fuel;
+
+  sp.x += sp.vx * dt;
+  sp.x = Math.max(40, Math.min(canvas.width-40, sp.x));
+
+  // Ocean surface: y = canvas.height * 0.72
+  const waterY = canvas.height * 0.72;
+  if (sp.y >= waterY) {
+    sp.y = waterY;
+    sp.vy = 0;
+    sp.landed = true;
+    sp.chutes = false;
+
+    const dist = Math.sqrt((sp.x-sp.targetX)**2 + (sp.y-sp.targetY)**2);
+    const inZone = dist < 60;
+    const accuracy = Math.max(0, 1 - dist/180);
+    const bonus = Math.round(accuracy * 600);
+    S.score += bonus;
+
+    log('eagle', 'Houston, we\'re in the water!', 0);
+    const msg = inZone ?
+      'SPLASHDOWN IN RECOVERY ZONE. USS Hornet has visual contact.' :
+      `Splashdown ${dist.toFixed(0)}m from recovery zone. Helicopter en route.`;
+    log('capcom', msg, 1000);
+    log('sys', `SCORE +${bonus} — MISSION COMPLETE`, 2000);
+    sfx.success();
+
+    const splashMsg = inZone ? 'Perfect splashdown in recovery zone!<br>' : `Splashdown ${dist.toFixed(0)}m off target.<br>`;
+    setTimeout(() => showFinalVictory(splashMsg), 4000);
+  }
+
+  updateTelemetry({
+    alt: Math.max(0, canvas.height*0.72 - sp.y),
+    vel: Math.sqrt(sp.vx**2+sp.vy**2),
+    fuel: sp.fuel,
+    thr: 0,
+    extra: { label:'DIST TO HORNET',
+             value: Math.sqrt((sp.x-sp.targetX)**2+(sp.y-sp.targetY)**2).toFixed(0)+' m',
+             warn: Math.sqrt((sp.x-sp.targetX)**2+(sp.y-sp.targetY)**2)>120 },
+  });
+}
+
+function initSplashdown() {
+  S.phase = 'splashdown';
+  const W=canvas.width, H=canvas.height;
+  const waterY = H * 0.72;
+
+  S.splashdown = {
+    x: W * (0.2 + Math.random()*0.6),
+    y: H * 0.05,
+    vx: (Math.random()-0.5)*18, // wind drift
+    vy: 50,                      // fall speed
+    fuel: S.fuel,
+    chutes: true,
+    landed: false,
+    targetX: W * (0.3 + Math.random()*0.4),
+    targetY: waterY,
+  };
+  updateProgress();
+  setKeyHint('← → LATERAL THRUSTERS\n(FUEL CRITICAL)');
+  log('sys', 'CM/SM SEPARATION CONFIRMED', 0);
+  log('eagle', 'Parachutes deployed. Coming down.', 1000);
+  log('capcom', 'Columbia, USS Hornet has you on radar. Use ← → thrusters to reach recovery zone. Every drop of fuel counts.', 2500);
+  if (S.fuel < 15) log('sys', `⚠ FUEL CRITICAL: ${S.fuel.toFixed(0)}% — MINIMAL CORRECTION CAPACITY`, 4000);
+
+  setButtons([]);
+  setHint('← → lateral thrusters — reach the USS Hornet recovery zone');
+}
+
+// ─── Victory canvas scene (moon surface) shown during landing celebration ──
+function drawMoonSurface() {
+  const W=canvas.width, H=canvas.height;
+  ctx.fillStyle='#000308'; ctx.fillRect(0,0,W,H);
+  drawStars();
+  drawMoon(W/2, H*0.28, 85);
+  const gY=H*0.7;
+  ctx.fillStyle='#1e1510'; ctx.fillRect(0,gY,W,H-gY);
+  ctx.fillStyle='#2a1e14';
+  for (let x=0;x<W;x+=52) {
+    ctx.beginPath(); ctx.arc(x+((x*7)%30),gY,14+((x*13)%24),Math.PI,Math.PI*2); ctx.fill();
+  }
+  const px=W/2;
+  ctx.fillStyle='#444'; ctx.fillRect(px-32,gY-5,64,5);
+  drawLEM(px, gY-22, 0, false);
+  ctx.strokeStyle='#ccc'; ctx.lineWidth=2;
+  ctx.beginPath(); ctx.moveTo(px+42,gY-5); ctx.lineTo(px+42,gY-48); ctx.stroke();
+  ctx.fillStyle='#bb2222'; ctx.fillRect(px+42,gY-48,24,16);
+  for (let i=0;i<8;i++) {
+    ctx.fillStyle=i%2===0?'#cc3333':'#ffffff';
+    ctx.fillRect(px+42,gY-48+i*2,24,2);
+  }
+  gtext('TRANQUILITY BASE', W/2, gY+22, {size:14, align:'center'});
+  gtext('JULY 20, 1969', W/2, gY+40, {size:11, align:'center', alpha:0.6});
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
