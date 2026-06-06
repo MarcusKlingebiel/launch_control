@@ -701,7 +701,7 @@ function setButtons(defs) {
     const b = document.createElement('button');
     b.className = 'btn' + (d.pulse?' pulse':'') + (d.off?' off':'');
     b.textContent = d.label;
-    if (!d.off) b.onclick = () => { sfx.click(); d.action(); };
+    b.onclick = () => { if (!b.classList.contains('off')) { sfx.click(); d.action(); } };
     area.appendChild(b);
   });
 }
