@@ -1160,8 +1160,8 @@ function drawDescent() {
 
   // Landing pad
   const px=ds.padX;
-  ctx.fillStyle='#444'; ctx.fillRect(px-32,groundY-5,64,5);
-  ctx.strokeStyle='#ffdd00'; ctx.lineWidth=2; ctx.strokeRect(px-32,groundY-5,64,5);
+  ctx.fillStyle='#444'; ctx.fillRect(px-52,groundY-5,104,5);
+  ctx.strokeStyle='#ffdd00'; ctx.lineWidth=2; ctx.strokeRect(px-52,groundY-5,104,5);
   // Flag
   ctx.strokeStyle='#aaa'; ctx.lineWidth=1.5;
   ctx.beginPath(); ctx.moveTo(px+36,groundY-5); ctx.lineTo(px+36,groundY-30); ctx.stroke();
@@ -1182,17 +1182,21 @@ function drawDescent() {
 
   // HUD
   const vv = Math.abs(ds.vy), hv = Math.abs(ds.vx), alt = Math.max(0, groundY-ds.y-20);
-  const vOk = vv < 8, hOk = hv < 4, aOk = Math.abs(ds.angle) < 15;
-  const onPad = Math.abs(ds.x-px) < 38;
+  const vOk = vv < 10, hOk = hv < 6, aOk = Math.abs(ds.angle) < 20;
+  const onPad = Math.abs(ds.x-px) < 52;
 
-  ctx.fillStyle='rgba(0,10,2,0.72)'; ctx.fillRect(8,8,165,96);
-  ctx.strokeStyle='rgba(0,255,65,0.2)'; ctx.lineWidth=1; ctx.strokeRect(8,8,165,96);
+  ctx.fillStyle='rgba(0,10,2,0.82)'; ctx.fillRect(8,8,186,110);
+  ctx.strokeStyle='rgba(0,255,65,0.2)'; ctx.lineWidth=1; ctx.strokeRect(8,8,186,110);
 
-  gtext(`VERT SPEED: ${vv.toFixed(1)} m/s`,  22,30,{size:11, color:vOk?'#00ff41':'#ff3300', glow:false});
-  gtext(`HORIZ SPD:  ${hv.toFixed(1)} m/s`,  22,46,{size:11, color:hOk?'#00ff41':'#ff3300', glow:false});
-  gtext(`ALTITUDE:   ${alt.toFixed(0)} m`,    22,62,{size:11, glow:false});
-  gtext(`FUEL:       ${ds.fuel.toFixed(0)}%`, 22,78,{size:11, color:ds.fuel<20?'#ff3300':'#00ff41', glow:false});
-  gtext(`ON PAD: ${onPad?'YES':'NO'}`,         22,94,{size:11, color:onPad?'#00ff41':'#ffdd00', glow:false});
+  const vc = vv<10?'#00ff41': vv<16?'#ffdd00':'#ff3300';
+  const hc = hv<6 ?'#00ff41': hv<10?'#ffdd00':'#ff3300';
+  const ac = aOk  ?'#00ff41':'#ff3300';
+  gtext(`VERT  ${vv.toFixed(1)} m/s  <10`, 22, 28,{size:11, color:vc, glow:false});
+  gtext(`HORIZ ${hv.toFixed(1)} m/s  <6`,  22, 44,{size:11, color:hc, glow:false});
+  gtext(`TILT  ${Math.abs(ds.angle).toFixed(0)}°      <20`, 22, 60,{size:11, color:ac, glow:false});
+  gtext(`ALT   ${alt.toFixed(0)} m`,        22, 76,{size:11, glow:false});
+  gtext(`FUEL  ${ds.fuel.toFixed(0)}%`,     22, 92,{size:11, color:ds.fuel<20?'#ff3300':ds.fuel<40?'#ffdd00':'#00ff41', glow:false});
+  gtext(`PAD   ${onPad?'✓ YES':'✗ NO'}`,   22,108,{size:11, color:onPad?'#00ff41':'#ffdd00', glow:false});
 
   if (ds.crashed) gtext('MISSION ABORT', W/2, H/2, {size:24, color:'#ff3300', align:'center'});
 }
@@ -1388,9 +1392,9 @@ function updateDescent(dt) {
 
   const W=canvas.width, H=canvas.height;
   const groundY = H - 55;
-  const GRAVITY  = 55;    // scaled lunar gravity px/s²
-  const THRUST_F = 145;   // scaled thrust px/s²
-  const ROT_SPD  = 80;    // deg/s
+  const GRAVITY  = 14;    // scaled lunar gravity px/s² (was 55 — way too brutal)
+  const THRUST_F = 52;    // scaled thrust px/s² (ratio ~3.7:1, feels responsive)
+  const ROT_SPD  = 50;    // deg/s (was 80 — one tap no longer spins wildly)
 
   if (S.keys['ArrowLeft'])  ds.angle -= ROT_SPD*dt;
   if (S.keys['ArrowRight']) ds.angle += ROT_SPD*dt;
@@ -1402,7 +1406,7 @@ function updateDescent(dt) {
     const aRad = ds.angle * Math.PI/180;
     ds.vx += Math.sin(aRad)  * THRUST_F * dt;
     ds.vy -= Math.cos(aRad)  * THRUST_F * dt;
-    ds.fuel = Math.max(0, ds.fuel - 9*dt);
+    ds.fuel = Math.max(0, ds.fuel - 6*dt);
     S.fuel = ds.fuel;
   }
 
@@ -1417,9 +1421,9 @@ function updateDescent(dt) {
     ds.y = groundY - 20;
     const vv = Math.abs(ds.vy), hv = Math.abs(ds.vx);
     const tilt = Math.abs(ds.angle);
-    const onPad = Math.abs(ds.x - ds.padX) < 38;
+    const onPad = Math.abs(ds.x - ds.padX) < 52;
 
-    if (vv < 8 && hv < 4 && tilt < 15 && onPad) {
+    if (vv < 10 && hv < 6 && tilt < 20 && onPad) {
       ds.landed = true; ds.vy = 0; ds.vx = 0;
       const bonus = Math.round(500 + (8-vv)*25 + ds.fuel*3);
       S.score += bonus;
@@ -1437,9 +1441,9 @@ function updateDescent(dt) {
       log('capcom', 'Eagle, we show contact. Mission abort.', 600);
       sfx.fail();
       const why = [];
-      if (vv >= 8)  why.push(`V-speed ${vv.toFixed(1)} m/s (need <8)`);
-      if (hv >= 4)  why.push(`H-speed ${hv.toFixed(1)} m/s (need <4)`);
-      if (tilt >= 15) why.push(`Tilt ${tilt.toFixed(0)}° (need <15°)`);
+      if (vv >= 10) why.push(`V-speed ${vv.toFixed(1)} m/s (need <10)`);
+      if (hv >= 6)  why.push(`H-speed ${hv.toFixed(1)} m/s (need <6)`);
+      if (tilt >= 20) why.push(`Tilt ${tilt.toFixed(0)}° (need <20°)`);
       if (!onPad)   why.push('Missed the landing pad');
       setTimeout(() => showResult(false,
         `CRASH — ${why.join(' · ')}<br><br>Total score: ${S.score}`), 2500);
@@ -1616,17 +1620,18 @@ function initDescent() {
   const W=canvas.width, H=canvas.height;
   const groundY = H - 55;
 
+  const padX = W*0.25 + Math.random()*W*0.5;
   S.descent = {
-    x: W*0.35 + Math.random()*W*0.3,
-    y: groundY - 280,
-    vx: (Math.random()-0.5) * 22,
-    vy: 18,
-    angle: (Math.random()-0.5) * 25,
+    x: padX + (Math.random()-0.5) * 50,  // start roughly above pad
+    y: groundY - 380,                      // more altitude to work with
+    vx: (Math.random()-0.5) * 8,           // gentler initial drift (was 22)
+    vy: 4,                                  // gentle initial fall (was 18)
+    angle: (Math.random()-0.5) * 12,        // smaller initial tilt (was 25)
     fuel: S.fuel,
     thrust: false,
     crashed: false,
     landed:  false,
-    padX: W*0.25 + Math.random()*W*0.5,
+    padX,
   };
   updateProgress();
   setKeyHint('↑ / SPACE = THRUST\n← → = ROTATE');
