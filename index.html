@@ -387,9 +387,15 @@
     <span class="phase-chip">X · REENTRY</span>
     <span class="phase-chip">XI · SPLASHDOWN</span>
   </div>
-  <button class="btn pulse" style="margin-top:8px;font-size:13px;padding:8px 28px"
-          onclick="startGame()">[ INITIATE MISSION ]</button>
-  <div style="font-size:10px;opacity:0.35;margin-top:4px">PRESS ENTER TO BEGIN</div>
+  <div style="display:flex;gap:28px;font-size:10px;opacity:0.5;letter-spacing:1px;flex-wrap:wrap;justify-content:center">
+    <span>SPACE · execute timed actions</span>
+    <span>↑ / SPACE · thrust</span>
+    <span>← → · rotate / correct</span>
+    <span>↑ ↓ · reentry angle</span>
+    <span>ENTER · restart</span>
+  </div>
+  <button class="btn pulse" style="margin-top:4px;font-size:13px;padding:8px 28px"
+          onclick="startGame()">[ SPACE · INITIATE MISSION ]</button>
 </div>
 
 <!-- ══ APP ════════════════════════════════════════════════════════════════ -->
@@ -1131,7 +1137,7 @@ function drawLOI() {
   if (!ls.burned) {
     const inZone = ls.vel >= ls.winLow && ls.vel <= ls.winHigh;
     gtext(
-      inZone ? '▶  EXECUTE BURN NOW  ◀' : 'WATCH VELOCITY GAUGE — CLICK WHEN IN YELLOW ZONE',
+      inZone ? '▶  PRESS SPACE NOW  ◀' : 'WATCH VELOCITY GAUGE — PRESS SPACE WHEN IN YELLOW ZONE',
       W/2, H-22, {size:11, color: inZone?'#ffdd00':'#00ff41', align:'center', alpha:0.75}
     );
   }
@@ -1484,10 +1490,11 @@ function doStageSep(fromPlayer) {
 function transitionToOrbit() {
   S.phase = 'orbit';
   updateProgress();
+  setKeyHint('SPACE = CONFIRM');
   log('eagle', 'Orbit achieved. 191 km, circular.', 0);
   log('capcom', 'Copy, orbit confirmed. Welcome to Earth orbit, Eagle.', 1200);
 
-  setButtons([{ label:'[ CONFIRM ORBIT — GO FOR TLI ]', pulse:true,
+  setButtons([{ label:'[ SPACE · CONFIRM ORBIT — GO FOR TLI ]', pulse:true,
     action() {
       S.score += 100;
       log('capcom', 'Eagle, you are GO for TLI sequence. Stand by.', 0);
@@ -1502,15 +1509,15 @@ function initTLI() {
   S.phase = 'tli';
   S.tli = { angle:0, speed:28, winStart:240, winEnd:300, burned:false };
   updateProgress();
-  setKeyHint('');
+  setKeyHint('SPACE = EXECUTE BURN');
   log('sys', 'COMMENCING TLI BURN WINDOW APPROACH', 0);
   log('eagle', 'S-IVB ready. Awaiting your mark for TLI burn.', 800);
   log('capcom', 'Roger. Watch for the burn window. Execute on your mark.', 2000);
 
-  setButtons([{ label:'[ EXECUTE TLI BURN ]', off:true,
+  setButtons([{ label:'[ SPACE · TLI BURN ]', off:true,
     action() { doTLIBurn(); }
   }]);
-  setHint('Click when spacecraft enters YELLOW arc');
+  setHint('SPACE when spacecraft enters YELLOW arc');
 }
 
 function doTLIBurn() {
@@ -1566,15 +1573,15 @@ function initLOI() {
   S.phase = 'loi';
   S.loi = { t:0, vel:2350, burned:false, winLow:1540, winHigh:1700 };
   updateProgress();
-  setKeyHint('');
+  setKeyHint('SPACE = EXECUTE BURN');
   log('sys', 'APPROACHING LUNAR SPHERE OF INFLUENCE', 0);
   log('eagle', 'We have the Moon. She\'s beautiful.', 1800);
   log('capcom', 'Eagle, prepare LOI burn. Execute when velocity gauge enters the yellow zone.', 3200);
 
-  setButtons([{ label:'[ EXECUTE LOI BURN ]', off:true,
+  setButtons([{ label:'[ SPACE · LOI BURN ]', off:true,
     action() { doLOIBurn(); }
   }]);
-  setHint('Click when velocity gauge is in YELLOW zone');
+  setHint('SPACE when velocity gauge is in YELLOW zone');
 }
 
 function doLOIBurn() {
@@ -2029,15 +2036,15 @@ function initRendezvous() {
     docked: false,
   };
   updateProgress();
-  setKeyHint('');
+  setKeyHint('SPACE = EXECUTE BURN');
   log('sys', 'RENDEZVOUS SEQUENCE INITIATED', 0);
   log('eagle', 'We have visual on Columbia. Beginning intercept.', 1000);
   log('capcom', 'Eagle, execute rendezvous burn when LEM enters the YELLOW window around CSM.', 2200);
 
-  setButtons([{ label:'[ EXECUTE RENDEZVOUS BURN ]', pulse:true,
+  setButtons([{ label:'[ SPACE · RENDEZVOUS BURN ]', pulse:true,
     action() { doRendezvousBurn(); }
   }]);
-  setHint('Click when Eagle (green) is in the yellow arc near Columbia');
+  setHint('SPACE when Eagle (green) is in the yellow arc near Columbia');
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -2139,15 +2146,16 @@ function initTEI() {
   S.phase = 'tei';
   S.tei = { angle:0, speed:20, winStart:130, winEnd:200, burned:false };
   updateProgress();
+  setKeyHint('SPACE = EXECUTE BURN');
   log('sys', 'TRANS-EARTH INJECTION SEQUENCE', 0);
   log('eagle', 'Ready for TEI burn. Awaiting your mark.', 1000);
   log('capcom', 'Columbia, execute TEI when you enter the burn window. Fuel state critical.', 2200);
   if (S.fuel < 25) log('sys', `⚠ FUEL CRITICAL: ${S.fuel.toFixed(0)}% — TEI BURN WILL LEAVE MINIMAL MARGIN`, 3500);
 
-  setButtons([{ label:'[ EXECUTE TEI BURN ]', off:true,
+  setButtons([{ label:'[ SPACE · TEI BURN ]', off:true,
     action() { doTEIBurn(); }
   }]);
-  setHint('Click when spacecraft enters the YELLOW window');
+  setHint('SPACE when spacecraft enters the YELLOW window');
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -2505,13 +2513,38 @@ function drawMoonSurface() {
 // ═══════════════════════════════════════════════════════════════════════════
 // INPUT
 // ═══════════════════════════════════════════════════════════════════════════
+
+// Phases where SPACE fires the active action button (not thrust)
+const ACTION_PHASES = new Set(['launch','orbit','tli','loi','rendezvous','tei']);
+
+function triggerActiveButton() {
+  const btn = document.querySelector('#btns .btn:not(.off)');
+  if (btn) btn.click();
+}
+
 document.addEventListener('keydown', e => {
   S.keys[e.key] = true;
   if (['ArrowUp','ArrowDown','ArrowLeft','ArrowRight',' '].includes(e.key)) {
     e.preventDefault();
   }
-  if (e.key === 'Enter' && document.getElementById('intro').style.display !== 'none') {
+
+  // Intro screen
+  if ((e.key === 'Enter' || e.key === ' ') &&
+      document.getElementById('intro').style.display !== 'none') {
     startGame();
+    return;
+  }
+
+  // Result/restart screen
+  if (e.key === 'Enter' &&
+      document.getElementById('result').classList.contains('show')) {
+    restartGame();
+    return;
+  }
+
+  // SPACE = universal action key for all timing phases
+  if (e.key === ' ' && ACTION_PHASES.has(S.phase)) {
+    triggerActiveButton();
   }
 });
 document.addEventListener('keyup', e => { S.keys[e.key] = false; });
@@ -2539,13 +2572,14 @@ function startGame() {
   log('capcom', 'Eagle, you are GO for launch. The clock is running.', 2400);
 
   setButtons([{ label:'[ AWAITING IGNITION ]', off:true, action(){}  }]);
-  setHint('Launch in progress — watch for SEPARATION WINDOW');
+  setHint('Watch for SEPARATION WINDOW — press SPACE to separate');
 
   setTimeout(() => {
     log('sys', 'IGNITION SEQUENCE START', 0);
     log('sys', 'LIFTOFF! ALL ENGINES RUNNING.', 1000);
     S.launch.active = true;
-    setButtons([{ label:'[ SEPARATE STAGE I ]', off:true,
+    setKeyHint('SPACE = SEPARATE STAGE I\n(window lights up yellow)');
+    setButtons([{ label:'[ SPACE · SEPARATE STAGE I ]', off:true,
       action() { doStageSep(true); }
     }]);
   }, 4000);
